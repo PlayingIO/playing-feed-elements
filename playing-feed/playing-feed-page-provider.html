@@ -1,0 +1,274 @@
+<link rel="import" href="../../polymer/polymer.html">
+<link rel="import" href="../../mostly-elements/mostly-common/mostly-operation.html">
+<script src="../../jsonic/jsonic.js"></script>
+
+<!--
+`playing-feed-page-provider` performs an feed query with the given parameters against feed activities.
+If the property docId is set, the provider DOCUMENT_HISTORY_PROVIDER is used with docId as queryParameter.
+If the property docId is not set, the EVENTS_VIEW provider is used instead.
+
+    <playing-feed-page-provider
+        current-page="{{entries}}" params="{...}" page-size="40'">
+    </playing-feed-page-provider>
+
+    <playing-feed-page-provider
+        current-page="{{entries}}" docId="..." page-size="40'">
+    </playing-feed-page-provider>
+
+@group Playing Elements
+@element playing-feed-page-provider
+-->
+<dom-module id="playing-feed-page-provider">
+  <template>
+    <style>
+      :host {
+        display: none;
+      }
+    </style>
+
+    <mostly-operation id="feedOp"
+            path="activities"
+            op="find"
+            method="get"
+            enrichers="{{enrichers}}"
+            schemas="[[schemas]]"
+            headers="{{headers}}">
+    </mostly-operation>
+  </template>
+  <script>
+    Polymer({
+      is: 'playing-feed-page-provider',
+      properties: {
+
+        /**
+         * The id of a mostly-connection to use.
+         */
+        connectionId: {
+          type: String,
+          value: ''
+        },
+
+        /**
+         * If true, automatically execute the operation when either `docId` or `params` change.
+         */
+        auto: {
+          type: Boolean,
+          value: false
+        },
+
+        /**
+         * The delay in milliseconds to debounce the auto fetch call when `docId`, `params`, etc. changes.
+         */
+        autoDelay: {
+          type: Number,
+          value: 300
+        },
+
+        /**
+         * The query parameters object.
+         */
+        params: {
+          type: Object,
+          value: {}
+        },
+
+        /**
+         * The document id to retrieve the history from.
+         * When set, the provider DOCUMENT_HISTORY_PROVIDER is used.
+         */
+        docId: {
+          type: String,
+          value: ''
+        },
+
+        /**
+         * The number of results per page.
+         */
+        pageSize: {
+          type: Number,
+          value: -1
+        },
+
+        /**
+         * The current page.
+         */
+        page: {
+          type: Number,
+          value: 1
+        },
+
+        /**
+         * The current page entries.
+         */
+        currentPage: {
+          type: Array,
+          value: [],
+          notify: true
+        },
+
+        /**
+         * Map of properties and direction 'asc' / 'desc'
+         */
+        sort: {
+          type: Object,
+          value: {},
+          notify: true
+        },
+
+        /**
+         * Total number of pages.
+         */
+        numberOfPages: {
+          type: Number,
+          notify: true
+        },
+
+        /**
+         * Total number of results.
+         */
+        resultsCount: {
+          type: Number,
+          notify: true
+        },
+
+        /**
+         * Returns true if a next page is available.
+         */
+        isNextPageAvailable: {
+          type: Boolean,
+          value: false,
+          notify: true
+        },
+
+        /**
+         * Current page's size
+         */
+        currentPageSize: {
+          type: Number,
+          notify: true
+        },
+
+        /**
+         * List of content enrichers to use.
+         */
+        enrichers: {
+          type: String,
+          value: ''
+        },
+
+        /**
+         * List of comma separated values of the document schemas to be returned.
+         * All document schemas are returned by default.
+         */
+        schemas: {
+          type: String
+        },
+
+        /**
+         * The headers of the request.
+         * 'Accept': 'text/plain,application/json' is already set by default.
+         */
+        headers: {type: Object, value: null},
+
+        /**
+         * True while requests are in flight.
+         */
+        loading: {
+          type: Boolean,
+          notify: true,
+          readOnly: true
+        }
+      },
+
+      observers: [
+        '_autoFetch(params.*, docId,  pageSize, page, sort)'
+      ],
+
+      /**
+       * Fired when the current page is fetched.
+       *
+       * @event update
+       **/
+
+      /**
+       * Stringifies the elements of a given object
+       */
+      _stringifyJSONObject : function(input) {
+        var result = input;
+        if (input !== null) {
+          Object.keys(input).forEach(function(key) {
+            if (typeof input[key] === "string") {
+              result[key] = input[key];
+            } else {
+              result[key] = JSON.stringify(input[key]);
+            }
+          });
+        }
+        return result;
+      },
+
+      /**
+       * Fetch the currentPage.
+       * @method fetch
+       */
+      fetch: function() {
+
+        var feed = `document:${this.docId}`;
+        var params = Object.assign({
+          feed: feed,
+          $skip: (this.page - 1) * this.pageSize,
+          $limit: this.pageSize
+        }, this.params);
+
+        // TODO axio's way to send object array?
+        if (this.sort) {
+          var sort = this.sort;
+          if (typeof this.sort === 'string') {
+            sort = jsonic(this.sort);
+          }
+          Object.entries(sort).forEach(([key, value]) => {
+            params['$sort[' + key + ']'] = value;
+          });
+        }
+
+        this.$.feedOp.params = params;
+        return this.$.feedOp.execute()
+          .then((response) => {
+            var data = response.data;
+            var metadata = response.metadata;
+            this.currentPage = data.slice(0);
+            this.numberOfPages = Math.floor(metadata.total / metadata.limit);
+            this.resultsCount = metadata.total;
+            this.isNextPageAvailable = metadata.skip + metadata.limit < metadata.total;
+            this.currentPageSize = metadata.limit;
+            this.fire('update');
+            return response;
+          });
+      },
+
+      _autoFetch: function () {
+        // if parameters changed, go back to page 1
+        var params = Object.keys(this.params).reduce((params, key) => {
+          if (key !== 'feed' && !key.startsWith('$')) params[key] = this.params[key];
+          return params;
+        }, {});
+        if ((this.docId && `document:${this.docId}` !== this.$.feedOp.params.feed)
+          || (this.params && this._stringifyJSONObject(this.params) !== this._stringifyJSONObject(params))) {
+          this.page = 1;
+        }
+        if (this.auto) {
+          // debounce in case of multiple param changes
+          this.debounce('_autoFetch', () => {
+            this.fetch();
+          }, this.autoDelay);
+        }
+      },
+
+      ready: function() {
+        this.$.feedOp.addEventListener('loading-changed', () => {
+          this._setLoading(this.$.feedOp.loading);
+        });
+      }
+    });
+  </script>
+</dom-module>
