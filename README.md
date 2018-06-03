@@ -1,7 +1,7 @@
 Playing Feed Web Components
 =============================
 
-Feed management web components for playful applications.
+Feed management web components for building playful applications.
 
 # Usage
 
