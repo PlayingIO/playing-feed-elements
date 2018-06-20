@@ -196,7 +196,7 @@ If the property docId is not set, the EVENTS_VIEW provider is used instead.
       _stringifyJSONObject : function(input) {
         var result = input;
         if (input !== null) {
-          Object.keys(input).forEach(function(key) {
+          Object.keys(input).forEach(key => {
             if (typeof input[key] === "string") {
               result[key] = input[key];
             } else {
